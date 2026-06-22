@@ -1,0 +1,4 @@
+id,name,description,domain,format,rows,columns,license,url,last_updated
+1,Sample Dataset A,A placeholder dataset about global temperatures.,climate,CSV,10000,12,CC-BY-4.0,https://example.com/dataset-a,2025-01-15
+2,Sample Dataset B,A placeholder dataset of movie reviews.,entertainment,CSV,50000,8,MIT,https://example.com/dataset-b,2024-11-20
+3,Sample Dataset C,A placeholder dataset of hospital records.,healthcare,CSV,25000,20,CC0,https://example.com/dataset-c,2025-03-10

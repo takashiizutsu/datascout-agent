@@ -1,0 +1,19 @@
+# =============================================================================
+# DataScout Agent — Python Dependencies
+# =============================================================================
+
+# Google Generative AI SDK (Gemini)
+google-generativeai>=0.8.0
+
+# Kaggle API client
+kaggle>=1.6.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Data handling
+pandas>=2.0.0
+
+# Streamlit UI
+streamlit>=1.30.0
+
