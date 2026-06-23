@@ -41,23 +41,31 @@ with st.sidebar:
     key_exists = bool(os.getenv("KAGGLE_KEY"))
     
     if username_exists and key_exists:
-        st.success("API Credentials Configured")
+        st.success("Kaggle API Configured")
     else:
-        st.error("API Credentials Missing")
+        st.error("Kaggle API Credentials Missing")
         st.warning("Please ensure KAGGLE_USERNAME and KAGGLE_KEY are set in your `.env` file.")
+        
+    st.markdown("---")
+    st.markdown("### Hugging Face API Status")
+    hf_token_exists = bool(os.getenv("HF_TOKEN"))
+    if hf_token_exists:
+        st.success("HF Hub Token Configured")
+    else:
+        st.info("HF Token Missing (Public Search Mode)")
         
     st.markdown("---")
     st.markdown(
         "**How it works:**\n"
         "1. **Intent Analyzer** extracts search keywords from your goal.\n"
-        "2. **Dataset Retriever** queries Kaggle using those keywords.\n"
+        "2. **Dataset Retriever** queries Kaggle and Hugging Face using those keywords.\n"
         "3. **Dataset Evaluator** scores and ranks candidate datasets using relevance, popularity, freshness, and usability.\n"
         "4. **Recommendations** present the top 5 candidates with detailed reasons and limitations."
     )
 
 # --- Main Page Layout ---
 st.title("🔍 DataScout Agent")
-st.markdown("### *AI-Powered Kaggle Dataset Discovery & Evaluation*")
+st.markdown("### *AI-Powered Dataset Discovery & Evaluation (Kaggle & Hugging Face)*")
 st.write(
     "Describe what you want to analyze in plain English. The agent will analyze your intent, "
     "retrieve candidate datasets from Kaggle, and evaluate them based on multiple quality criteria."
@@ -101,7 +109,7 @@ if search_clicked:
                 
                 if not candidates:
                     status.update(label="No datasets found.", state="complete")
-                    st.error("No relevant Kaggle datasets were found for this query.")
+                    st.error("No relevant Kaggle/Hugging Face datasets were found for this query.")
                     
                     st.markdown("### Suggestions:")
                     st.markdown("- Try broader or more general keywords.")
@@ -118,6 +126,14 @@ if search_clicked:
                     # Update status indicator to finished
                     status.update(label="Discovery and evaluation complete!", state="complete", expanded=False)
                     
+                    # --- Display Extracted Intent ---
+                    st.markdown("### 🎯 Extracted Intent Analysis")
+                    ic1, ic2, ic3 = st.columns(3)
+                    ic1.markdown(f"**Primary Topic:** `{intent.get('primary_topic', 'N/A')}`")
+                    ic2.markdown(f"**Location Filter:** `{intent.get('location', 'Global')}`")
+                    ic3.markdown(f"**Secondary Concepts:** `{', '.join(intent.get('secondary_concepts', [])) or 'None'}`")
+                    st.markdown("---")
+
                     # --- Display Results ---
                     semantic_active = any(ds.get("vector_similarity") is not None for ds in top_datasets)
                     if semantic_active:
@@ -138,8 +154,9 @@ if search_clicked:
                     # Loop over and render top recommendations
                     for rank, ds in enumerate(top_datasets, start=1):
                         with st.container():
-                            # Clickable title linking to the Kaggle dataset page
-                            st.markdown(f"#### **#{rank} [{ds['title']}]({ds['url']})**")
+                            # Clickable title linking to the dataset page
+                            source_badge = "📊 **Kaggle**" if ds.get("source") == "kaggle" else "🤗 **Hugging Face**"
+                            st.markdown(f"#### **#{rank} [{ds['title']}]({ds['url']})** &nbsp;&nbsp;&nbsp;&nbsp; {source_badge}")
                             
                             # Grid of key dataset metrics (5 columns for semantic similarity)
                             m1, m2, m3, m4, m5 = st.columns(5)
@@ -160,13 +177,27 @@ if search_clicked:
                             date_str = raw_date.split()[0] if raw_date and raw_date.split() else "N/A"
                             m5.metric("Last Updated", date_str)
                             
+                            # Show intent-aware adjustments
+                            adjustments = []
+                            if ds.get("topic_relevance", 0.0) == 1.0:
+                                adjustments.append("🟢 **Primary Topic Boost (+0.15)** (Title/Subtitle match)")
+                            elif ds.get("topic_relevance", 0.0) == 0.5:
+                                adjustments.append("🟡 **Primary Topic Boost (+0.05)** (Description/Tag match)")
+                            if ds.get("location_match", 0.0) > 0.0:
+                                adjustments.append("🌐 **Location Match Boost (+0.05)**")
+                            if ds.get("generic_penalty_applied"):
+                                adjustments.append("🔴 **Generic Keyword Penalty (-65% composite score)** (Matches generic keywords without primary topic)")
+                            
+                            if adjustments:
+                                st.write(" | ".join(adjustments))
+
                             # Generate explanations using the helper functions
                             reason = _build_reason(ds, intent['keywords'])
                             limitation = _build_limitation(ds)
                             
                             st.write(f"**👍 Reason:** {reason}")
                             st.write(f"**⚠️ Limitation:** {limitation}")
-                            st.caption(f"Kaggle Reference: `{ds['ref']}`")
+                            st.caption(f"Dataset Reference: `{ds['ref']}`")
                             st.markdown("---")
                     
                     # Expose the full CLI format report in an expander for debugging/reference

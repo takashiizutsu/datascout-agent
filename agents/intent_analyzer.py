@@ -97,17 +97,38 @@ class IntentAnalyzer:
                 - keywords (list[str]): Search terms for the Kaggle API.
                 - domain (str | None): The detected broad domain.
                 - goal_summary (str): The original goal text.
+                - primary_topic (str): The core entity/subject (e.g. 'diabetes').
+                - secondary_concepts (list[str]): Concept qualifiers.
+                - location (str | None): Geographic scope.
         """
-        # --- Step 1: Tokenize ---
-        # Lowercase, strip punctuation, split into words.
-        text = goal.lower()
-        tokens = re.findall(r"[a-z]+", text)
+        text_lower = goal.lower()
 
-        # --- Step 2: Remove stop words ---
-        # Keep only meaningful terms that aren't in our stop word list.
+        # --- Step 1: Extract Location ---
+        location = None
+        locations_map = {
+            "united states": "United States",
+            "us": "United States",
+            "usa": "United States",
+            "united kingdom": "United Kingdom",
+            "uk": "United Kingdom",
+            "india": "India",
+            "canada": "Canada",
+            "germany": "Germany",
+        }
+        for loc_key, loc_name in locations_map.items():
+            if re.search(r"\b" + re.escape(loc_key) + r"\b", text_lower):
+                location = loc_name
+                # Remove location terms to avoid treating location keywords as primary topic
+                text_lower = re.sub(r"\b" + re.escape(loc_key) + r"\b", "", text_lower)
+                break
+
+        # --- Step 2: Tokenize the remaining text ---
+        tokens = re.findall(r"[a-z]+", text_lower)
+
+        # --- Step 3: Remove stop words ---
         keywords = [t for t in tokens if t not in STOP_WORDS and len(t) > 1]
 
-        # --- Step 3: Deduplicate while preserving order ---
+        # --- Step 4: Deduplicate while preserving order ---
         seen = set()
         unique_keywords = []
         for kw in keywords:
@@ -115,9 +136,8 @@ class IntentAnalyzer:
                 seen.add(kw)
                 unique_keywords.append(kw)
 
-        # --- Step 4: Expand with synonyms ---
-        # Check if any extracted keyword has synonyms in our map.
-        expanded = list(unique_keywords)  # copy
+        # --- Step 5: Expand with synonyms ---
+        expanded = list(unique_keywords)
         for kw in unique_keywords:
             if kw in SYNONYM_MAP:
                 for synonym in SYNONYM_MAP[kw]:
@@ -125,14 +145,30 @@ class IntentAnalyzer:
                         expanded.append(synonym)
                         seen.add(synonym)
 
-        # --- Step 5: Detect domain ---
-        # Scan keywords against the domain map to assign a broad category.
+        # --- Step 6: Identify Primary Topic & Secondary Concepts ---
+        primary_topic = None
+        # Try to match keywords against known SYNONYM_MAP keys (core medical/subject domains)
+        for kw in unique_keywords:
+            if kw in SYNONYM_MAP:
+                primary_topic = kw
+                break
+        
+        # If no known key matches, default to the first extracted keyword
+        if not primary_topic and unique_keywords:
+            primary_topic = unique_keywords[0]
+            
+        secondary_concepts = [kw for kw in unique_keywords if kw != primary_topic]
+
+        # --- Step 7: Detect domain ---
         domain = self._detect_domain(expanded)
 
         return {
             "keywords": expanded,
             "domain": domain,
             "goal_summary": goal.strip(),
+            "primary_topic": primary_topic or "general",
+            "secondary_concepts": secondary_concepts,
+            "location": location,
         }
 
     def _detect_domain(self, keywords: list[str]) -> str | None:

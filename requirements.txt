@@ -17,3 +17,7 @@ pandas>=2.0.0
 # Streamlit UI
 streamlit>=1.30.0
 
+# Hugging Face Hub Client
+huggingface_hub>=0.20.0
+
+

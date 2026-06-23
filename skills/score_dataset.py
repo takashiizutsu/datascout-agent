@@ -36,14 +36,15 @@ WEIGHT_RULE_BASED = 0.40
 ZERO_RELEVANCE_PENALTY = 0.4
 
 
-def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float | None = None) -> dict:
+def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float | None = None, intent: dict = None) -> dict:
     """
-    Compute a composite score for a Kaggle dataset.
+    Compute a composite score for a Kaggle or Hugging Face dataset.
 
     Args:
         dataset: A dict of Kaggle dataset metadata (from search_kaggle_datasets).
         keywords: The list of search keywords from the IntentAnalyzer.
         vector_similarity: Optional pre-computed semantic similarity score (0-1).
+        intent: Optional structured intent dict containing primary_topic, secondary_concepts, and location.
 
     Returns:
         A new dict that is a copy of the input dataset with added keys:
@@ -52,7 +53,10 @@ def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float |
             - freshness_score (float): 0–1
             - usability_score (float): 0–1
             - vector_similarity (float | None): Cosine similarity
-            - composite_score (float): Weighted combination (0–1), with penalty
+            - topic_relevance (float): Topic relevance match (0.0, 0.5, or 1.0)
+            - location_match (float): Location relevance match (0.0 or 1.0)
+            - generic_penalty_applied (bool): True if generic term penalty was applied
+            - composite_score (float): Weighted combination (0–1), with penalty and boosts
     """
     relevance  = _score_relevance(dataset, keywords)
     popularity = _score_popularity(dataset)
@@ -83,6 +87,97 @@ def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float |
     else:
         composite = rule_based_composite
 
+    # ──────────────────────────────────────────────────────────────────
+    # Intent-Aware Scoring (Topic Boost, Location Boost, Generic Penalty)
+    # ──────────────────────────────────────────────────────────────────
+    import re
+    
+    title_lower = (dataset.get("title") or "").lower()
+    subtitle_lower = (dataset.get("subtitle") or "").lower()
+    desc_lower = (dataset.get("description") or "").lower()
+    
+    topic_relevance = 0.0
+    primary_match = False
+    location_match = 0.0
+    generic_penalty_applied = False
+    
+    # 1. Topic Boost
+    primary_topic = intent.get("primary_topic") if intent else None
+    if primary_topic and primary_topic != "general":
+        primary_topic = primary_topic.lower()
+        
+        # Local copy of synonyms mapping for robust, self-contained matching
+        LOCAL_SYNONYMS = {
+            "dementia":       ["alzheimer", "cognitive decline"],
+            "alzheimer":      ["dementia", "cognitive decline"],
+            "cancer":         ["tumor", "oncology"],
+            "diabetes":       ["blood sugar", "glucose"],
+            "heart":          ["cardiac", "cardiovascular"],
+            "housing":        ["real estate", "property prices"],
+            "climate":        ["weather", "global warming", "temperature"],
+            "covid":          ["coronavirus", "pandemic", "sars-cov-2"],
+            "education":      ["student performance", "school"],
+            "employment":     ["jobs", "unemployment", "labor market"],
+            "crime":          ["criminal", "public safety"],
+            "pollution":      ["air quality", "emissions"],
+            "mental health":  ["depression", "anxiety", "psychological"],
+        }
+        
+        syns = LOCAL_SYNONYMS.get(primary_topic, [])
+        primary_terms = [primary_topic] + syns
+        
+        # Direct Match (Title or Subtitle contains the primary topic or its synonyms)
+        if any(term in title_lower for term in primary_terms) or any(term in subtitle_lower for term in primary_terms):
+            topic_relevance = 1.0
+            primary_match = True
+            composite += 0.15
+        # Indirect Match (Description contains the primary topic or its synonyms)
+        elif any(term in desc_lower for term in primary_terms) or (dataset.get("tags") and any(term in tag.lower() for tag in dataset["tags"] for term in primary_terms)):
+            topic_relevance = 0.5
+            primary_match = True
+            composite += 0.05
+            
+    # 2. Location Boost
+    location_term = intent.get("location") if intent else None
+    if location_term:
+        loc_lower = location_term.lower()
+        loc_terms = [loc_lower]
+        if loc_lower == "united states":
+            loc_terms.extend(["us", "usa", "u.s."])
+        elif loc_lower == "united kingdom":
+            loc_terms.extend(["uk", "gb", "u.k."])
+            
+        # Check if location appears in title, description, or tags
+        matches_loc = (
+            any(term in title_lower for term in loc_terms) 
+            or any(term in subtitle_lower for term in loc_terms) 
+            or any(term in desc_lower for term in loc_terms)
+            or (dataset.get("tags") and any(term in tag.lower() for tag in dataset["tags"] for term in loc_terms))
+        )
+        if matches_loc:
+            location_match = 1.0
+            composite += 0.05
+
+    # 3. Generic Term Penalty
+    # List of generic concepts that yield false positives when they are not bound to the primary topic
+    GENERIC_TERMS = {
+        "factors", "prediction", "predict", "risk", "analysis", "report", 
+        "market", "states", "united", "trend", "trends", "overview", "insights"
+    }
+    
+    # Extract words from title
+    title_words = set(re.findall(r"[a-z]+", title_lower))
+    has_generic = bool(title_words & GENERIC_TERMS)
+    
+    # If the title matches generic search words but is NOT related to the primary topic,
+    # apply a heavy penalty (65% penalty) to prevent it from ranking highly.
+    if has_generic and not primary_match and primary_topic and primary_topic != "general":
+        generic_penalty_applied = True
+        composite *= 0.35
+        
+    # Cap final composite score at 1.0 and floor at 0.0
+    composite = max(0.0, min(1.0, composite))
+
     # Return a copy of the dataset augmented with scores.
     scored = dict(dataset)
     scored["relevance_score"]  = round(relevance, 4)
@@ -90,10 +185,16 @@ def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float |
     scored["freshness_score"]  = round(freshness, 4)
     scored["usability_score"]  = round(usability, 4)
     scored["vector_similarity"] = round(vector_similarity, 4) if vector_similarity is not None else None
+    scored["topic_relevance"]  = topic_relevance
+    scored["location_match"]  = location_match
+    scored["generic_penalty_applied"] = generic_penalty_applied
     scored["composite_score"]  = round(composite, 4)
 
-    # --- Add Kaggle URL for display ---
-    scored["url"] = f"https://www.kaggle.com/datasets/{dataset['ref']}"
+    # --- Add URL for display based on source repository ---
+    if dataset.get("source") == "kaggle":
+        scored["url"] = f"https://www.kaggle.com/datasets/{dataset['ref']}"
+    else:
+        scored["url"] = f"https://huggingface.co/datasets/{dataset['ref']}"
 
     return scored
 

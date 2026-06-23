@@ -42,26 +42,26 @@ class DatasetEvaluator:
         keywords = intent.get("keywords", [])
         query = intent.get("goal_summary", "")
 
-        # --- Precompute vector similarities using Gemini embeddings ---
+        # --- Step 1: Precompute vector similarities using Gemini embeddings ---
         # Fallback to None if generation fails or GOOGLE_API_KEY is missing.
         similarities = None
         if query and datasets:
             similarities = compute_vector_similarities(query, datasets)
 
-        # --- Step 1: Score every candidate dataset ---
+        # --- Step 2: Score every candidate dataset ---
         scored = []
         for idx, ds in enumerate(datasets):
             sim = similarities[idx] if similarities is not None else None
-            scored_ds = score_dataset(ds, keywords, vector_similarity=sim)
+            scored_ds = score_dataset(ds, keywords, vector_similarity=sim, intent=intent)
             scored.append(scored_ds)
 
-        # --- Step 2: Sort by composite score (highest first) ---
+        # --- Step 3: Sort the final list by composite score (highest first) ---
         scored.sort(key=lambda d: d["composite_score"], reverse=True)
 
-        # --- Step 3: Take top-k ---
+        # --- Step 4: Take top-k ---
         top = scored[:top_k]
 
-        # --- Step 4: Generate the recommendation report ---
+        # --- Step 5: Generate the recommendation report ---
         report = generate_recommendation(top, intent)
 
         return top, report

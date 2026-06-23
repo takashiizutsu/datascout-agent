@@ -38,11 +38,16 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
     lines.append(f"  Goal: \"{goal}\"")
     lines.append(f"  Domain: {domain}")
     lines.append(f"  Keywords: {', '.join(keywords)}")
+    if intent:
+        lines.append(f"  Primary Topic: {intent.get('primary_topic', 'N/A')}")
+        lines.append(f"  Secondary Concepts: {', '.join(intent.get('secondary_concepts', []))}")
+        if intent.get('location'):
+            lines.append(f"  Location: {intent.get('location')}")
     lines.append("=" * 70)
 
     # --- Edge case: weak relevance warning ---
     # If the best dataset has a relevance score below 0.3, warn the user.
-    best_relevance = max(ds["relevance_score"] for ds in scored_datasets)
+    best_relevance = max(ds["relevance_score"] for ds in scored_datasets) if scored_datasets else 0.0
     if best_relevance < 0.3:
         lines.append("")
         lines.append("  ⚠  WEAK RELEVANCE WARNING")
@@ -65,11 +70,24 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
             f"usability={ds['usability_score']:.2f}"
         ])
 
+        # Add intent-aware boosts/penalties to score parts
+        intent_parts = []
+        if ds.get("topic_relevance", 0.0) > 0.0:
+            intent_parts.append(f"topic_boost={'+0.15' if ds['topic_relevance'] == 1.0 else '+0.05'}")
+        if ds.get("location_match", 0.0) > 0.0:
+            intent_parts.append("location_boost=+0.05")
+        if ds.get("generic_penalty_applied"):
+            intent_parts.append("generic_penalty=65%_reduction")
+        if intent_parts:
+            score_parts.append(f"intent: {', '.join(intent_parts)}")
+
         lines.append(f"  Score:      {ds['composite_score']:.2f}  ({', '.join(score_parts)})")
         lines.append(f"  Downloads:  {ds['download_count']:,}")
         lines.append(f"  Usability:  {ds['usability_rating']}")
         lines.append(f"  Updated:    {ds['last_updated']}")
         lines.append(f"  URL:        {ds['url']}")
+        source_name = "Kaggle" if ds.get("source") == "kaggle" else "Hugging Face"
+        lines.append(f"  Source:     {source_name}")
 
         # --- Reason ---
         reason = _build_reason(ds, keywords)

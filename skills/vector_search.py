@@ -34,75 +34,6 @@ def cosine_similarity(v1: list[float], v2: list[float]) -> float:
     return float(dot_product / (norm1 * norm2))
 
 
-def generate_embeddings(texts: list[str]) -> list[list[float]] | None:
-    """
-    Generate embeddings for a list of text strings using the Gemini API.
-    Attempts models in EMBEDDING_MODELS list and handles failure gracefully.
-    
-    Returns:
-        A list of embedding vectors (list of lists of floats), or None if generation failed.
-    """
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        print("[VectorSearch] Warning: GOOGLE_API_KEY not found in environment.")
-        return None
-        
-    genai.configure(api_key=api_key)
-    
-    # Try models in order
-    for model_name in EMBEDDING_MODELS:
-        try:
-            # Batch embedding call. 'content' accepts a list of strings.
-            # task_type='retrieval_document' is recommended for corpus documents.
-            result = genai.embed_content(
-                model=model_name,
-                content=texts,
-                task_type="retrieval_document"
-            )
-            # Inspect the return format
-            embeddings = result.get('embedding')
-            if embeddings and isinstance(embeddings, list):
-                # Ensure it's a list of vectors. For single item input,
-                # the API might return a single vector or a list depending on input list type.
-                # Since we pass a list of texts, it should return a list of vectors.
-                # If it returned a single vector (e.g. if list was simplified by SDK), we wrap it.
-                if len(texts) == 1 and not isinstance(embeddings[0], list):
-                    return [embeddings]
-                return embeddings
-        except Exception as e:
-            print(f"[VectorSearch] Info: Model '{model_name}' failed: {e}")
-            
-    print("[VectorSearch] Error: All Gemini embedding models failed to generate embeddings.")
-    return None
-
-
-def generate_query_embedding(query: str) -> list[float] | None:
-    """
-    Generate embedding for the search query.
-    Uses task_type='retrieval_query' for query-side embeddings.
-    """
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return None
-        
-    genai.configure(api_key=api_key)
-    
-    for model_name in EMBEDDING_MODELS:
-        try:
-            result = genai.embed_content(
-                model=model_name,
-                content=query,
-                task_type="retrieval_query"
-            )
-            embedding = result.get('embedding')
-            if embedding:
-                return embedding
-        except Exception as e:
-            pass
-            
-    return None
-
-
 def construct_searchable_text(ds: dict) -> str:
     """
     Convert a dataset metadata dictionary into a single concatenated text string
@@ -128,7 +59,6 @@ def construct_searchable_text(ds: dict) -> str:
     # Include tags/keywords if available
     tags = ds.get("tags", [])
     if tags:
-        # Check if list of strings or dicts
         tag_str_list = []
         for tag in tags:
             if isinstance(tag, str):
@@ -145,6 +75,8 @@ def construct_searchable_text(ds: dict) -> str:
 def compute_vector_similarities(query: str, datasets: list[dict]) -> list[float] | None:
     """
     Computes cosine similarity between the query and all candidate datasets.
+    Guarantees that both the query and dataset embeddings are generated
+    using the exact same model to avoid mismatched vector space errors.
     
     Args:
         query: The user's natural language goal.
@@ -157,25 +89,55 @@ def compute_vector_similarities(query: str, datasets: list[dict]) -> list[float]
     if not datasets:
         return []
         
-    # 1. Generate query embedding
-    query_emb = generate_query_embedding(query)
-    if not query_emb:
-        print("[VectorSearch] Warning: Failed to generate query embedding.")
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        print("[VectorSearch] Warning: GOOGLE_API_KEY not found in environment.")
         return None
         
-    # 2. Build searchable texts for all datasets
-    searchable_texts = [construct_searchable_text(ds) for ds in datasets]
+    genai.configure(api_key=api_key)
     
-    # 3. Batch generate dataset embeddings
-    dataset_embs = generate_embeddings(searchable_texts)
-    if not dataset_embs or len(dataset_embs) != len(datasets):
-        print("[VectorSearch] Warning: Failed to generate dataset embeddings.")
-        return None
-        
-    # 4. Compute cosine similarity for each dataset
-    similarities = []
-    for emb in dataset_embs:
-        sim = cosine_similarity(query_emb, emb)
-        similarities.append(sim)
-        
-    return similarities
+    # Loop over models to ensure query and datasets are embedded with the SAME model
+    for model_name in EMBEDDING_MODELS:
+        try:
+            # 1. Generate query embedding
+            q_result = genai.embed_content(
+                model=model_name,
+                content=query,
+                task_type="retrieval_query"
+            )
+            query_emb = q_result.get('embedding')
+            if not query_emb:
+                continue
+                
+            # 2. Build searchable texts for all datasets
+            searchable_texts = [construct_searchable_text(ds) for ds in datasets]
+            
+            # 3. Batch generate dataset embeddings
+            ds_result = genai.embed_content(
+                model=model_name,
+                content=searchable_texts,
+                task_type="retrieval_document"
+            )
+            dataset_embs = ds_result.get('embedding')
+            
+            # Validate batch result matches dataset input size
+            if not dataset_embs or len(dataset_embs) != len(datasets):
+                continue
+                
+            # Ensure proper nesting for single dataset edge case
+            if len(datasets) == 1 and not isinstance(dataset_embs[0], list):
+                dataset_embs = [dataset_embs]
+                
+            # 4. Compute cosine similarity for each dataset
+            similarities = []
+            for emb in dataset_embs:
+                sim = cosine_similarity(query_emb, emb)
+                similarities.append(sim)
+                
+            return similarities
+            
+        except Exception as e:
+            print(f"[VectorSearch] Info: Model '{model_name}' failed: {e}")
+            
+    print("[VectorSearch] Error: All Gemini embedding models failed to generate embeddings.")
+    return None
