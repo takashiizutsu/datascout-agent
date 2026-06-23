@@ -119,6 +119,12 @@ if search_clicked:
                     status.update(label="Discovery and evaluation complete!", state="complete", expanded=False)
                     
                     # --- Display Results ---
+                    semantic_active = any(ds.get("vector_similarity") is not None for ds in top_datasets)
+                    if semantic_active:
+                        st.info("🧠 **Semantic Search Enabled:** Leveraging Gemini embeddings to rank datasets by semantic meaning in addition to keywords.")
+                    else:
+                        st.warning("⚠️ **Fallback Rule-Based Search Active:** Gemini embeddings are unavailable. Using keyword match and metadata metrics only.")
+
                     st.success(f"Successfully evaluated {len(candidates)} candidate datasets. Here are the top recommendations:")
                     
                     # Check for weak relevance warning across all retrieved datasets
@@ -135,16 +141,24 @@ if search_clicked:
                             # Clickable title linking to the Kaggle dataset page
                             st.markdown(f"#### **#{rank} [{ds['title']}]({ds['url']})**")
                             
-                            # Grid of key dataset metrics
-                            m1, m2, m3, m4 = st.columns(4)
+                            # Grid of key dataset metrics (5 columns for semantic similarity)
+                            m1, m2, m3, m4, m5 = st.columns(5)
                             m1.metric("Composite Score", f"{ds['composite_score']:.2f}")
-                            m2.metric("Downloads", f"{ds['download_count']:,}")
-                            m3.metric("Usability Rating", f"{ds['usability_rating'] or 'N/A'}")
+                            
+                            # Display semantic similarity or a helper text if fallback was active
+                            v_sim = ds.get("vector_similarity")
+                            if v_sim is not None:
+                                m2.metric("Semantic Similarity", f"{v_sim:.2f}")
+                            else:
+                                m2.metric("Semantic Similarity", "N/A", help="embeddings fell back to rule-based")
+                                
+                            m3.metric("Downloads", f"{ds['download_count']:,}")
+                            m4.metric("Usability Rating", f"{ds['usability_rating'] or 'N/A'}")
                             
                             # Safely extract the date part from the timestamp
                             raw_date = ds.get('last_updated', '')
                             date_str = raw_date.split()[0] if raw_date and raw_date.split() else "N/A"
-                            m4.metric("Last Updated", date_str)
+                            m5.metric("Last Updated", date_str)
                             
                             # Generate explanations using the helper functions
                             reason = _build_reason(ds, intent['keywords'])

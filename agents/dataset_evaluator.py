@@ -14,6 +14,7 @@ Pipeline:
 
 from skills.score_dataset import score_dataset
 from skills.generate_recommendation import generate_recommendation
+from skills.vector_search import compute_vector_similarities
 
 
 class DatasetEvaluator:
@@ -39,11 +40,19 @@ class DatasetEvaluator:
                 - report (str): A formatted recommendation report string.
         """
         keywords = intent.get("keywords", [])
+        query = intent.get("goal_summary", "")
+
+        # --- Precompute vector similarities using Gemini embeddings ---
+        # Fallback to None if generation fails or GOOGLE_API_KEY is missing.
+        similarities = None
+        if query and datasets:
+            similarities = compute_vector_similarities(query, datasets)
 
         # --- Step 1: Score every candidate dataset ---
         scored = []
-        for ds in datasets:
-            scored_ds = score_dataset(ds, keywords)
+        for idx, ds in enumerate(datasets):
+            sim = similarities[idx] if similarities is not None else None
+            scored_ds = score_dataset(ds, keywords, vector_similarity=sim)
             scored.append(scored_ds)
 
         # --- Step 2: Sort by composite score (highest first) ---

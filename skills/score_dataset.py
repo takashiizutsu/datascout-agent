@@ -26,19 +26,24 @@ WEIGHT_POPULARITY = 0.20
 WEIGHT_FRESHNESS  = 0.15
 WEIGHT_USABILITY  = 0.25
 
+# --- Vector search combination weights ---
+WEIGHT_VECTOR = 0.60
+WEIGHT_RULE_BASED = 0.40
+
 # --- Penalty for zero relevance ---
 # Multiplier applied to the composite score when no keywords match the title.
 # 0.4 means "keep 40% of the score" → a 60% penalty.
 ZERO_RELEVANCE_PENALTY = 0.4
 
 
-def score_dataset(dataset: dict, keywords: list[str]) -> dict:
+def score_dataset(dataset: dict, keywords: list[str], vector_similarity: float | None = None) -> dict:
     """
     Compute a composite score for a Kaggle dataset.
 
     Args:
         dataset: A dict of Kaggle dataset metadata (from search_kaggle_datasets).
         keywords: The list of search keywords from the IntentAnalyzer.
+        vector_similarity: Optional pre-computed semantic similarity score (0-1).
 
     Returns:
         A new dict that is a copy of the input dataset with added keys:
@@ -46,6 +51,7 @@ def score_dataset(dataset: dict, keywords: list[str]) -> dict:
             - popularity_score (float): 0–1
             - freshness_score (float): 0–1
             - usability_score (float): 0–1
+            - vector_similarity (float | None): Cosine similarity
             - composite_score (float): Weighted combination (0–1), with penalty
     """
     relevance  = _score_relevance(dataset, keywords)
@@ -54,7 +60,7 @@ def score_dataset(dataset: dict, keywords: list[str]) -> dict:
     usability  = _score_usability(dataset)
 
     # --- Weighted composite ---
-    composite = (
+    rule_based_composite = (
         WEIGHT_RELEVANCE  * relevance
         + WEIGHT_POPULARITY * popularity
         + WEIGHT_FRESHNESS  * freshness
@@ -65,8 +71,17 @@ def score_dataset(dataset: dict, keywords: list[str]) -> dict:
     # If none of the user's keywords appear in the dataset title, the dataset
     # is likely not relevant to the goal. Penalize its composite score so that
     # popularity/usability alone can't push it into the top ranks.
-    if relevance == 0.0 and keywords:
-        composite *= ZERO_RELEVANCE_PENALTY
+    # Bypassed if vector similarity is high (>= 0.40) indicating a strong semantic match.
+    apply_penalty = relevance == 0.0 and keywords
+    if apply_penalty:
+        if vector_similarity is None or vector_similarity < 0.40:
+            rule_based_composite *= ZERO_RELEVANCE_PENALTY
+
+    # --- Combine Rule-based and Semantic similarity scores ---
+    if vector_similarity is not None:
+        composite = (WEIGHT_VECTOR * vector_similarity) + (WEIGHT_RULE_BASED * rule_based_composite)
+    else:
+        composite = rule_based_composite
 
     # Return a copy of the dataset augmented with scores.
     scored = dict(dataset)
@@ -74,6 +89,7 @@ def score_dataset(dataset: dict, keywords: list[str]) -> dict:
     scored["popularity_score"] = round(popularity, 4)
     scored["freshness_score"]  = round(freshness, 4)
     scored["usability_score"]  = round(usability, 4)
+    scored["vector_similarity"] = round(vector_similarity, 4) if vector_similarity is not None else None
     scored["composite_score"]  = round(composite, 4)
 
     # --- Add Kaggle URL for display ---

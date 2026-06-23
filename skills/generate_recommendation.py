@@ -54,11 +54,18 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
         lines.append("")
         lines.append(f"  #{rank}  {ds['title']}")
         lines.append("  " + "-" * 66)
-        lines.append(f"  Score:      {ds['composite_score']:.2f}  "
-                      f"(relevance={ds['relevance_score']:.2f}, "
-                      f"popularity={ds['popularity_score']:.2f}, "
-                      f"freshness={ds['freshness_score']:.2f}, "
-                      f"usability={ds['usability_score']:.2f})")
+
+        # Build composite sub-scores representation
+        score_parts = [f"relevance={ds['relevance_score']:.2f}"]
+        if ds.get("vector_similarity") is not None:
+            score_parts.append(f"semantic={ds['vector_similarity']:.2f}")
+        score_parts.extend([
+            f"popularity={ds['popularity_score']:.2f}",
+            f"freshness={ds['freshness_score']:.2f}",
+            f"usability={ds['usability_score']:.2f}"
+        ])
+
+        lines.append(f"  Score:      {ds['composite_score']:.2f}  ({', '.join(score_parts)})")
         lines.append(f"  Downloads:  {ds['download_count']:,}")
         lines.append(f"  Usability:  {ds['usability_rating']}")
         lines.append(f"  Updated:    {ds['last_updated']}")
@@ -111,6 +118,14 @@ def _build_reason(ds: dict, keywords: list[str]) -> str:
     """
     parts = []
 
+    # Relevance & Semantic similarity
+    v_sim = ds.get("vector_similarity")
+    if v_sim is not None:
+        if v_sim >= 0.70:
+            parts.append(f"strong semantic match ({v_sim:.2f})")
+        elif v_sim >= 0.50:
+            parts.append(f"moderate semantic match ({v_sim:.2f})")
+
     # Relevance
     if ds["relevance_score"] >= 0.5:
         title_lower = ds["title"].lower()
@@ -151,7 +166,11 @@ def _build_limitation(ds: dict) -> str:
 
     # Relevance concern
     if ds["relevance_score"] == 0.0:
-        issues.append("no keyword match in title — verify relevance manually")
+        v_sim = ds.get("vector_similarity")
+        if v_sim is None or v_sim < 0.40:
+            issues.append("no keyword match in title — verify relevance manually")
+        else:
+            issues.append(f"no keyword match in title (semantic similarity is {v_sim:.2f})")
 
     # Freshness concern
     if ds["freshness_score"] < 0.3:

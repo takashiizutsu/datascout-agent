@@ -53,9 +53,23 @@ def search_kaggle_datasets(query: str, max_results: int = 20) -> list[dict]:
     # from its internal camelCase field registry via camel_to_snake).
     datasets = []
     for dataset in results[:max_results]:
+        # Safely extract tag names if available
+        tag_names = []
+        if hasattr(dataset, "tags") and dataset.tags:
+            for tag in dataset.tags:
+                if isinstance(tag, dict):
+                    name = tag.get("name")
+                else:
+                    name = getattr(tag, "name", None)
+                if name:
+                    tag_names.append(name)
+
         datasets.append({
             "ref": dataset.ref,
             "title": dataset.title,
+            "subtitle": getattr(dataset, "subtitle", "") or "",
+            "description": getattr(dataset, "description", "") or "",
+            "tags": tag_names,
             "total_bytes": dataset.total_bytes,
             "last_updated": str(dataset.last_updated),
             "download_count": dataset.download_count,
