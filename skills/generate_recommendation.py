@@ -11,14 +11,14 @@ Edge cases handled:
 """
 
 
-def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
+def generate_recommendation(scored_datasets: list[dict], intent: dict, quality_assessment: dict = None) -> str:
     """
     Generate a formatted recommendation report for the top scored datasets.
 
     Args:
-        scored_datasets: A list of dataset dicts with composite_score and
-                         sub-scores already computed (sorted best-first).
+        scored_datasets: A list of dataset dicts with evaluation_score and other metrics.
         intent: The structured intent dict from IntentAnalyzer.
+        quality_assessment: Optional overall search quality evaluation from EvaluationAgent.
 
     Returns:
         A formatted multi-line string containing the full recommendation report.
@@ -45,6 +45,17 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
             lines.append(f"  Location: {intent.get('location')}")
     lines.append("=" * 70)
 
+    # --- Overall Quality Assessment ---
+    if quality_assessment:
+        lines.append("")
+        lines.append("  🎯 OVERALL SEARCH QUALITY ASSESSMENT (Gemini Evaluator)")
+        lines.append(f"  Quality Score: {quality_assessment.get('quality_score', 0.0):.2f}")
+        lines.append(f"  Verdict:       {quality_assessment.get('verdict', 'N/A')}")
+        lines.append("  Assessment Reasons:")
+        for reason_bullet in quality_assessment.get('reasons', []):
+            lines.append(f"    - {reason_bullet}")
+        lines.append("  " + "-" * 66)
+
     # --- Edge case: weak relevance warning ---
     # If the best dataset has a relevance score below 0.3, warn the user.
     best_relevance = max(ds["relevance_score"] for ds in scored_datasets) if scored_datasets else 0.0
@@ -60,7 +71,7 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
         lines.append(f"  #{rank}  {ds['title']}")
         lines.append("  " + "-" * 66)
 
-        # Build composite sub-scores representation
+        # Build composite sub-scores representation for reference
         score_parts = [f"relevance={ds['relevance_score']:.2f}"]
         if ds.get("vector_similarity") is not None:
             score_parts.append(f"semantic={ds['vector_similarity']:.2f}")
@@ -81,21 +92,23 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict) -> str:
         if intent_parts:
             score_parts.append(f"intent: {', '.join(intent_parts)}")
 
-        lines.append(f"  Score:      {ds['composite_score']:.2f}  ({', '.join(score_parts)})")
-        lines.append(f"  Downloads:  {ds['download_count']:,}")
-        lines.append(f"  Usability:  {ds['usability_rating']}")
-        lines.append(f"  Updated:    {ds['last_updated']}")
-        lines.append(f"  URL:        {ds['url']}")
+        lines.append(f"  Evaluation Score:  {ds.get('evaluation_score', 0.0):.2f} (Confidence: {ds.get('confidence', 0.0):.2f}, Verdict: {ds.get('verdict', 'N/A')})")
+        lines.append(f"  Evaluation Reason: {ds.get('evaluation_reason', 'N/A')}")
+        lines.append(f"  [Ref Baseline]     composite_score={ds.get('composite_score', 0.0):.2f} ({', '.join(score_parts)})")
+        lines.append(f"  Downloads:         {ds['download_count']:,}")
+        lines.append(f"  Usability:         {ds['usability_rating']}")
+        lines.append(f"  Updated:           {ds['last_updated']}")
+        lines.append(f"  URL:               {ds['url']}")
         source_name = "Kaggle" if ds.get("source") == "kaggle" else "Hugging Face"
-        lines.append(f"  Source:     {source_name}")
+        lines.append(f"  Source:            {source_name}")
 
         # --- Reason ---
         reason = _build_reason(ds, keywords)
-        lines.append(f"  Reason:     {reason}")
+        lines.append(f"  Reason (Baseline): {reason}")
 
         # --- Limitation ---
         limitation = _build_limitation(ds)
-        lines.append(f"  Limitation: {limitation}")
+        lines.append(f"  Limitation:        {limitation}")
 
     lines.append("")
     lines.append("=" * 70)

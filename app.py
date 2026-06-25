@@ -121,7 +121,7 @@ if search_clicked:
                     # Step 3: Evaluate and Rank Candidates
                     status.write("📊 Scoring and ranking candidate datasets...")
                     evaluator = DatasetEvaluator()
-                    top_datasets, report = evaluator.evaluate(candidates, intent, top_k=5)
+                    top_datasets, report, quality_assessment = evaluator.evaluate(candidates, intent, top_k=10)
                     
                     # Update status indicator to finished
                     status.update(label="Discovery and evaluation complete!", state="complete", expanded=False)
@@ -133,6 +133,19 @@ if search_clicked:
                     ic2.markdown(f"**Location Filter:** `{intent.get('location', 'Global')}`")
                     ic3.markdown(f"**Secondary Concepts:** `{', '.join(intent.get('secondary_concepts', [])) or 'None'}`")
                     st.markdown("---")
+
+                    # --- Display Search Quality Assessment ---
+                    if quality_assessment:
+                        st.markdown("### 🎯 Overall Search Quality Assessment (Gemini)")
+                        qc1, qc2 = st.columns([1, 4])
+                        qc1.metric("Search Quality Score", f"{quality_assessment.get('quality_score', 0.0):.2f}")
+                        qc1.markdown(f"**Verdict:** `{quality_assessment.get('verdict', 'N/A')}`")
+                        
+                        with qc2:
+                            st.markdown("**Key Observations:**")
+                            for reason_bullet in quality_assessment.get("reasons", []):
+                                st.markdown(f"- {reason_bullet}")
+                        st.markdown("---")
 
                     # --- Display Results ---
                     semantic_active = any(ds.get("vector_similarity") is not None for ds in top_datasets)
@@ -158,25 +171,17 @@ if search_clicked:
                             source_badge = "📊 **Kaggle**" if ds.get("source") == "kaggle" else "🤗 **Hugging Face**"
                             st.markdown(f"#### **#{rank} [{ds['title']}]({ds['url']})** &nbsp;&nbsp;&nbsp;&nbsp; {source_badge}")
                             
-                            # Grid of key dataset metrics (5 columns for semantic similarity)
+                            # Grid of key dataset metrics
                             m1, m2, m3, m4, m5 = st.columns(5)
-                            m1.metric("Composite Score", f"{ds['composite_score']:.2f}")
+                            m1.metric("Evaluation Score", f"{ds.get('evaluation_score', 0.0):.2f}")
+                            m2.metric("Confidence Score", f"{ds.get('confidence', 0.0):.2f}")
+                            m3.metric("Verdict", ds.get('verdict', 'N/A'))
+                            m4.metric("Downloads", f"{ds['download_count']:,}")
+                            m5.metric("Usability Rating", f"{ds['usability_rating'] or 'N/A'}")
                             
-                            # Display semantic similarity or a helper text if fallback was active
-                            v_sim = ds.get("vector_similarity")
-                            if v_sim is not None:
-                                m2.metric("Semantic Similarity", f"{v_sim:.2f}")
-                            else:
-                                m2.metric("Semantic Similarity", "N/A", help="embeddings fell back to rule-based")
-                                
-                            m3.metric("Downloads", f"{ds['download_count']:,}")
-                            m4.metric("Usability Rating", f"{ds['usability_rating'] or 'N/A'}")
-                            
-                            # Safely extract the date part from the timestamp
-                            raw_date = ds.get('last_updated', '')
-                            date_str = raw_date.split()[0] if raw_date and raw_date.split() else "N/A"
-                            m5.metric("Last Updated", date_str)
-                            
+                            # Show evaluation reason
+                            st.write(f"**📋 Evaluation Reason:** {ds.get('evaluation_reason', 'N/A')}")
+
                             # Show intent-aware adjustments
                             adjustments = []
                             if ds.get("topic_relevance", 0.0) == 1.0:
@@ -195,9 +200,14 @@ if search_clicked:
                             reason = _build_reason(ds, intent['keywords'])
                             limitation = _build_limitation(ds)
                             
-                            st.write(f"**👍 Reason:** {reason}")
+                            st.write(f"**👍 Baseline Reason:** {reason}")
                             st.write(f"**⚠️ Limitation:** {limitation}")
-                            st.caption(f"Dataset Reference: `{ds['ref']}`")
+                            st.caption(
+                                f"Dataset Reference: `{ds['ref']}` | "
+                                f"Composite Score: {ds['composite_score']:.2f} | "
+                                f"Semantic Similarity: {ds.get('vector_similarity', 'N/A')} | "
+                                f"Last Updated: {ds.get('last_updated', 'N/A')}"
+                            )
                             st.markdown("---")
                     
                     # Expose the full CLI format report in an expander for debugging/reference

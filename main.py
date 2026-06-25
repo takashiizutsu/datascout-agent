@@ -72,9 +72,9 @@ def main():
     print()
 
     # ── Step 3: Evaluation & Ranking ─────────────────────────────
-    print("[Step 3] Evaluating and ranking datasets...")
+    print("[Step 3] Evaluating and ranking datasets using Gemini Evaluation Agent...")
     evaluator = DatasetEvaluator()
-    top_datasets, report = evaluator.evaluate(candidates, intent, top_k=5)
+    top_datasets, report, quality_assessment = evaluator.evaluate(candidates, intent, top_k=10)
 
     # ── Step 4: Display Recommendations ──────────────────────────
     print(report)
