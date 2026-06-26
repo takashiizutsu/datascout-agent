@@ -15,15 +15,24 @@ from huggingface_hub import HfApi
 
 # Module-level API client (created once, reused across calls)
 _api = None
+_auth_failed = False  # Track if token authentication has failed
 
 
 def _get_api() -> HfApi:
     """Return an HfApi instance, creating it on first use."""
-    global _api
+    global _api, _auth_failed
     if _api is None:
-        hf_token = os.getenv("HF_TOKEN")
-        # Initialize client. Token is optional for public dataset search.
-        _api = HfApi(token=hf_token)
+        if _auth_failed:
+            _api = HfApi(token=None)
+        else:
+            hf_token = os.getenv("HF_TOKEN")
+            if hf_token:
+                hf_token = hf_token.strip().strip('"').strip("'").replace("\r", "").replace("\n", "")
+            # If the sanitized token is empty, treat as None
+            if not hf_token:
+                hf_token = None
+            # Initialize client. Token is optional for public dataset search.
+            _api = HfApi(token=hf_token)
     return _api
 
 
@@ -38,14 +47,33 @@ def search_huggingface_datasets(query: str, max_results: int = 20) -> list[dict]
     Returns:
         A list of dicts mapped to the unified schema.
     """
+    global _api, _auth_failed
     try:
         api = _get_api()
         # list_datasets returns a generator of DatasetInfo objects
         results = api.list_datasets(search=query, limit=max_results)
         results_list = list(results)
     except Exception as e:
-        print(f"[HuggingFaceSearch] Warning: Failed to query Hugging Face API: {e}")
-        return []
+        # Check if this failure was due to a 401 Unauthorized
+        is_401 = False
+        if hasattr(e, "response") and getattr(e.response, "status_code", None) == 401:
+            is_401 = True
+        elif "401" in str(e) or "unauthorized" in str(e).lower() or "invalid user token" in str(e).lower():
+            is_401 = True
+
+        if is_401 and getattr(api, "token", None) is not None:
+            print("[HuggingFaceSearch] HF_TOKEN authentication failed. Falling back to public Hugging Face dataset search.")
+            _auth_failed = True
+            _api = HfApi(token=None)  # Cache a fresh public client globally
+            try:
+                results = _api.list_datasets(search=query, limit=max_results)
+                results_list = list(results)
+            except Exception as e_pub:
+                print(f"[HuggingFaceSearch] Error: Public Hugging Face search also failed: {e_pub}")
+                return []
+        else:
+            print(f"[HuggingFaceSearch] Warning: Failed to query Hugging Face API: {e}")
+            return []
 
     datasets = []
     for dataset in results_list:

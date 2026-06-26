@@ -24,8 +24,14 @@ class DatasetEvaluator:
     def __init__(self):
         """Initialize the DatasetEvaluator and its sub-agents."""
         self.evaluation_agent = EvaluationAgent()
+        self.kaggle_eval = 0
+        self.hf_eval = 0
+        self.total_eval = 0
+        self.kaggle_top10 = 0
+        self.hf_top10 = 0
+        self.total_top10 = 0
 
-    def evaluate(self, datasets: list[dict], intent: dict, top_k: int = 10) -> tuple[list[dict], str, dict]:
+    def evaluate(self, datasets: list[dict], intent: dict, top_k: int = 10, search_plan: dict = None) -> tuple[list[dict], str, dict]:
         """
         Score, rank, independently evaluate, and generate recommendations.
 
@@ -33,6 +39,7 @@ class DatasetEvaluator:
             datasets: List of dataset metadata dicts from the retriever.
             intent: The structured intent dict from IntentAnalyzer.
             top_k: Number of top datasets to return (default 10).
+            search_plan: Optional search plan dict from QueryPlannerAgent.
 
         Returns:
             A tuple of:
@@ -60,6 +67,10 @@ class DatasetEvaluator:
         scored.sort(key=lambda d: d["composite_score"], reverse=True)
         top_20 = scored[:20]
 
+        self.kaggle_eval = sum(1 for d in top_20 if d.get("source") == "kaggle")
+        self.hf_eval = sum(1 for d in top_20 if d.get("source") == "huggingface")
+        self.total_eval = len(top_20)
+
         # --- Step 4: Run Gemini-based independent candidate evaluation ---
         print(f"[DatasetEvaluator] Evaluating Top {len(top_20)} candidates using Gemini...")
         evaluated_candidates = self.evaluation_agent.evaluate_candidates(top_20, intent)
@@ -71,7 +82,11 @@ class DatasetEvaluator:
         # --- Step 6: Take final top_k recommendations ---
         top = evaluated_candidates[:top_k]
 
+        self.kaggle_top10 = sum(1 for d in top if d.get("source") == "kaggle")
+        self.hf_top10 = sum(1 for d in top if d.get("source") == "huggingface")
+        self.total_top10 = len(top)
+
         # --- Step 7: Generate the recommendation report ---
-        report = generate_recommendation(top, intent, quality_assessment=quality_assessment)
+        report = generate_recommendation(top, intent, quality_assessment=quality_assessment, search_plan=search_plan)
 
         return top, report, quality_assessment

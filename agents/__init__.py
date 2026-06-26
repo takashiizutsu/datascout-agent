@@ -6,10 +6,12 @@ This package contains the core agents that power the DataScout pipeline:
   - DatasetRetriever: Retrieves relevant datasets via semantic search.
   - DatasetEvaluator: Scores and ranks candidate datasets.
   - EvaluationAgent: Evaluates candidates and search quality using Gemini.
+  - QueryPlannerAgent: Generates structured search plans from goals using Gemini.
 """
 
 from agents.intent_analyzer import IntentAnalyzer
 from agents.dataset_retriever import DatasetRetriever
 from agents.dataset_evaluator import DatasetEvaluator
 from agents.evaluation_agent import EvaluationAgent
+from agents.query_planner_agent import QueryPlannerAgent
 

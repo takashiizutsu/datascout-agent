@@ -11,7 +11,7 @@ Edge cases handled:
 """
 
 
-def generate_recommendation(scored_datasets: list[dict], intent: dict, quality_assessment: dict = None) -> str:
+def generate_recommendation(scored_datasets: list[dict], intent: dict, quality_assessment: dict = None, search_plan: dict = None) -> str:
     """
     Generate a formatted recommendation report for the top scored datasets.
 
@@ -19,6 +19,7 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict, quality_a
         scored_datasets: A list of dataset dicts with evaluation_score and other metrics.
         intent: The structured intent dict from IntentAnalyzer.
         quality_assessment: Optional overall search quality evaluation from EvaluationAgent.
+        search_plan: Optional search plan dict from QueryPlannerAgent.
 
     Returns:
         A formatted multi-line string containing the full recommendation report.
@@ -38,6 +39,8 @@ def generate_recommendation(scored_datasets: list[dict], intent: dict, quality_a
     lines.append(f"  Goal: \"{goal}\"")
     lines.append(f"  Domain: {domain}")
     lines.append(f"  Keywords: {', '.join(keywords)}")
+    if search_plan and search_plan.get("search_queries"):
+        lines.append(f"  Search Queries: {'; '.join(search_plan['search_queries'])}")
     if intent:
         lines.append(f"  Primary Topic: {intent.get('primary_topic', 'N/A')}")
         lines.append(f"  Secondary Concepts: {', '.join(intent.get('secondary_concepts', []))}")
